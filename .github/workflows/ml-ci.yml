@@ -47,6 +47,15 @@ jobs:
       - name: Check ML Quality Gate
         run: python quality_gate.py
 
+              # Verify trained model artifacts
+      - name: Verify model artifacts
+        run: |
+          echo "Checking generated model files..."
+          ls -lh *.pkl
+          test -f user_behavior_model.pkl
+          test -f label_encoders.pkl
+          echo "Both model artifacts are available."
+
       # 7. Run automated tests
       - name: Run Automated Tests
         run: python -m unittest discover -v
