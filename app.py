@@ -1,106 +1,90 @@
-from pathlib import Path
-
-import joblib
+from flask import Flask, request, jsonify
 import pandas as pd
-from flask import Flask, jsonify, request
-
+import joblib
 
 app = Flask(__name__)
 
-MODEL_PATH = Path("user_behavior_model.pkl")
-ENCODER_PATH = Path("label_encoders.pkl")
-
-FEATURES = [
-    "Device Model",
-    "Operating System",
-    "App Usage Time (min/day)",
-    "Screen On Time (hours/day)",
-    "Battery Drain (mAh/day)",
-    "Number of Apps Installed",
-    "Data Usage (MB/day)",
-    "Age",
-    "Gender"
-]
+# Load the trained User Behavior model
+model = joblib.load("user_behavior_model.pkl")
 
 
-def load_model():
-    if not MODEL_PATH.exists():
-        raise FileNotFoundError(
-            "user_behavior_model.pkl was not found. "
-            "Run the training pipeline first."
-        )
-
-    return joblib.load(MODEL_PATH)
-
-
-def load_encoders():
-    if not ENCODER_PATH.exists():
-        raise FileNotFoundError(
-            "label_encoders.pkl was not found. "
-            "Run the training pipeline first."
-        )
-
-    return joblib.load(ENCODER_PATH)
-
-
-@app.get("/")
-def health_check():
+# Health check endpoint
+@app.route("/health", methods=["GET"])
+def health():
     return jsonify({
-        "status": "ok",
-        "service": "user-behavior-prediction"
+        "status": "healthy"
     })
 
 
-@app.post("/predict")
+# Prediction endpoint
+@app.route("/predict", methods=["POST"])
 def predict():
 
-    data = request.get_json(silent=True)
+    try:
+        data = request.get_json()
 
-    if not data:
+        if not data:
+            return jsonify({
+                "error": "No JSON data provided"
+            }), 400
+
+        # Required input features
+        required_features = [
+            "Device Model",
+            "Operating System",
+            "App Usage Time (min/day)",
+            "Screen On Time (hours/day)",
+            "Battery Drain (mAh/day)",
+            "Number of Apps Installed",
+            "Data Usage (MB/day)",
+            "Age",
+            "Gender"
+        ]
+
+        # Check for missing features
+        missing_features = [
+            feature for feature in required_features
+            if feature not in data
+        ]
+
+        if missing_features:
+            return jsonify({
+                "error": "Missing required features",
+                "missing_features": missing_features
+            }), 400
+
+        # Create DataFrame with the same feature structure
+        # used during model training
+        input_data = pd.DataFrame([{
+            "Device Model": data["Device Model"],
+            "Operating System": data["Operating System"],
+            "App Usage Time (min/day)": float(data["App Usage Time (min/day)"]),
+            "Screen On Time (hours/day)": float(data["Screen On Time (hours/day)"]),
+            "Battery Drain (mAh/day)": float(data["Battery Drain (mAh/day)"]),
+            "Number of Apps Installed": int(data["Number of Apps Installed"]),
+            "Data Usage (MB/day)": float(data["Data Usage (MB/day)"]),
+            "Age": int(data["Age"]),
+            "Gender": data["Gender"]
+        }])
+
+        # Generate prediction
+        prediction = model.predict(input_data)[0]
+
+        # Return prediction
         return jsonify({
-            "error": "JSON request body is required"
-        }), 400
+            "prediction": int(prediction)
+        })
 
-    missing_fields = [
-        feature for feature in FEATURES
-        if feature not in data
-    ]
+    except Exception as e:
 
-    if missing_fields:
         return jsonify({
-            "error": "Missing required fields",
-            "missing_fields": missing_fields
-        }), 400
-
-    encoders = load_encoders()
-
-    sample_data = {}
-
-    for feature in FEATURES:
-
-        if feature in encoders:
-            try:
-                sample_data[feature] = encoders[feature].transform(
-                    [data[feature]]
-                )[0]
-            except ValueError:
-                return jsonify({
-                    "error": f"Unknown value for {feature}"
-                }), 400
-        else:
-            sample_data[feature] = data[feature]
-
-    sample = pd.DataFrame([sample_data])
-
-    model = load_model()
-
-    prediction = int(model.predict(sample)[0])
-
-    return jsonify({
-        "prediction": prediction,
-        "prediction_type": "User Behavior Class"
-    })
+            "error": str(e)
+        }), 500
 
 
+# Start Flask application
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(
+        host="0.0.0.0",
+        port=5000
+    )
