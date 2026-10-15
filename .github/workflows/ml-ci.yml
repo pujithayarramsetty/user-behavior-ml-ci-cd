@@ -153,3 +153,45 @@ jobs:
         run: |
           IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           docker push ghcr.io/${IMAGE_NAME}:latest
+                # Practical-8: Pull the published image
+      - name: Pull published image from GHCR
+        if: success() && github.event_name != 'pull_request'
+        run: |
+          IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          docker pull ghcr.io/${IMAGE_NAME}:latest
+
+      # Verify the pulled image
+      - name: Verify published Docker image
+        if: success() && github.event_name != 'pull_request'
+        run: |
+          docker image inspect \
+            ghcr.io/pujithayarramsetty/user-behavior-ml-ci-cd:latest
+
+      # Run the published image
+      - name: Run published container
+        if: success() && github.event_name != 'pull_request'
+        run: |
+          docker run -d \
+            --name published-user-behavior-container \
+            -p 5001:5000 \
+            ghcr.io/pujithayarramsetty/user-behavior-ml-ci-cd:latest
+
+      # Test the published container
+      - name: Test published container health
+        if: success() && github.event_name != 'pull_request'
+        run: |
+          for i in {1..15}; do
+            if curl --fail --silent http://localhost:5001/health; then
+              echo "Published container is healthy."
+              exit 0
+            fi
+            sleep 2
+          done
+
+          docker logs published-user-behavior-container
+          exit 1
+
+      # Clean up published container
+      - name: Remove published container
+        if: always()
+        run: docker rm -f published-user-behavior-container || true
