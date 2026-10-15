@@ -17,11 +17,9 @@ permissions:
 
 jobs:
   train-test-containerize:
-
     runs-on: ubuntu-latest
 
     steps:
-
       # 1. Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -30,7 +28,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       # 3. Upgrade pip
       - name: Upgrade pip
@@ -40,15 +38,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # 5. Train the ML model
+      # 5. Train the User Behavior model
       - name: Train User Behavior Model
         run: python train_model.py
 
-      # 6. Check ML quality gate
+      # 6. Check model quality
       - name: Check ML Quality Gate
         run: python quality_gate.py
 
-              # Verify trained model artifacts
+      # 7. Verify generated model files
       - name: Verify model artifacts
         run: |
           echo "Checking generated model files..."
@@ -57,15 +55,15 @@ jobs:
           test -f label_encoders.pkl
           echo "Both model artifacts are available."
 
-      # 7. Run automated tests
+      # 8. Run automated tests
       - name: Run Automated Tests
         run: python -m unittest discover -v
 
-      # 8. Build Docker image
+      # 9. Build Docker image
       - name: Build Docker image
         run: docker build -t user-behavior-ml:${{ github.sha }} .
 
-      # 9. Start Docker container
+      # 10. Start Docker container
       - name: Start Docker container
         run: |
           docker run -d \
@@ -73,7 +71,7 @@ jobs:
             -p 5000:5000 \
             user-behavior-ml:${{ github.sha }}
 
-      # 10. Wait for Flask application
+      # 11. Check application health
       - name: Wait for application to become ready
         run: |
           for i in {1..15}; do
@@ -90,7 +88,7 @@ jobs:
           docker logs user-behavior-container
           exit 1
 
-      # 11. Test prediction API
+      # 12. Test prediction API
       - name: Test prediction endpoint
         run: |
           response=$(curl --fail --silent --show-error \
@@ -110,15 +108,48 @@ jobs:
             http://localhost:5000/predict)
 
           echo "Prediction response: $response"
-
           echo "$response" | grep -q '"prediction"'
 
-      # 12. Show Docker logs
+      # 13. Display Docker logs
       - name: Show Docker container logs
         if: always()
         run: docker logs user-behavior-container || true
 
-      # 13. Stop and remove container
+      # 14. Remove Docker container
       - name: Stop and remove Docker container
         if: always()
         run: docker rm -f user-behavior-container || true
+
+      # 15. Login to GitHub Container Registry
+      - name: Login to GHCR
+        if: success() && github.event_name != 'pull_request'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io \
+            -u "${{ github.actor }}" \
+            --password-stdin
+
+      # 16. Tag the Docker image
+      - name: Tag Docker image for GHCR
+        if: success() && github.event_name != 'pull_request'
+        run: |
+          IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+
+          docker tag user-behavior-ml:${{ github.sha }} \
+            ghcr.io/${IMAGE_NAME}:v1
+
+          docker tag user-behavior-ml:${{ github.sha }} \
+            ghcr.io/${IMAGE_NAME}:latest
+
+      # 17. Publish versioned image
+      - name: Push versioned image to GHCR
+        if: success() && github.event_name != 'pull_request'
+        run: |
+          IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          docker push ghcr.io/${IMAGE_NAME}:v1
+
+      # 18. Publish latest image
+      - name: Push latest image to GHCR
+        if: success() && github.event_name != 'pull_request'
+        run: |
+          IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          docker push ghcr.io/${IMAGE_NAME}:latest
