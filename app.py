@@ -29,7 +29,7 @@ except Exception:
     raise
 
 
-# Log every request without recording user input values
+# Log every request when it starts
 @app.before_request
 def log_request_start():
     g.request_id = str(uuid.uuid4())
@@ -49,7 +49,8 @@ def log_request_end(response):
     duration = time.time() - getattr(g, "start_time", time.time())
 
     logger.info(
-        "Request completed | id=%s method=%s path=%s status=%s duration=%.3fs",
+        "Request completed | id=%s method=%s path=%s "
+        "status=%s duration=%.3fs",
         getattr(g, "request_id", "unknown"),
         request.method,
         request.path,
@@ -60,6 +61,7 @@ def log_request_end(response):
     response.headers["X-Request-ID"] = getattr(
         g, "request_id", "unknown"
     )
+
     return response
 
 
@@ -83,12 +85,16 @@ def predict():
     try:
         data = request.get_json(silent=True)
 
-        if not data or not isinstance(data, dict):
-            logger.warning("Prediction request contains invalid or empty JSON.")
+        # Validate JSON input
+        if not isinstance(data, dict) or not data:
+            logger.warning(
+                "Prediction request contains invalid or empty JSON."
+            )
             return jsonify({
                 "error": "No valid JSON object provided"
             }), 400
 
+        # Required input fields
         required_fields = [
             "Device Model",
             "Operating System",
@@ -101,6 +107,7 @@ def predict():
             "Gender"
         ]
 
+        # Check missing fields
         missing_fields = [
             field for field in required_fields
             if field not in data
@@ -139,13 +146,16 @@ def predict():
                 "Age": int(data["Age"]),
                 "Gender": data["Gender"]
             }])
+
         except (ValueError, TypeError, OverflowError):
-            logger.warning("Prediction request contains invalid numeric values.")
+            logger.warning(
+                "Prediction request contains invalid numeric values."
+            )
             return jsonify({
                 "error": "Invalid numeric input values"
             }), 400
 
-        # Encode categorical features using training encoders
+        # Encode categorical features
         categorical_columns = [
             "Device Model",
             "Operating System",
@@ -159,6 +169,7 @@ def predict():
                 input_data[column] = encoder.transform(
                     input_data[column]
                 )
+
             except ValueError:
                 logger.warning(
                     "Unknown categorical value for feature: %s",
@@ -185,15 +196,17 @@ def predict():
             "Unexpected prediction error | request_id=%s",
             getattr(g, "request_id", "unknown")
         )
+
         return jsonify({
             "error": "Internal server error",
             "request_id": getattr(g, "request_id", "unknown")
         }), 500
 
 
-# Run locally
+# Start Flask application
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+
     app.run(
         host="0.0.0.0",
         port=port,
