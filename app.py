@@ -1,3 +1,4 @@
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 import logging
 import os
@@ -9,6 +10,19 @@ import pandas as pd
 import joblib
 
 app = Flask(__name__)
+
+# Prometheus metrics
+REQUEST_COUNT = Counter(
+    "flask_requests_total",
+    "Total number of HTTP requests",
+    ["method", "endpoint", "status"]
+)
+
+REQUEST_LATENCY = Histogram(
+    "flask_request_duration_seconds",
+    "HTTP request processing time"
+)
+
 
 # Configure logging for Render and local execution
 logging.basicConfig(
