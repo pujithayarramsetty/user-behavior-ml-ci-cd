@@ -1,13 +1,14 @@
-
 name: User Behavior ML CI-CD
 
 on:
   push:
     branches:
       - main
+
   pull_request:
     branches:
       - main
+
   workflow_dispatch:
 
 permissions:
@@ -19,7 +20,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      
       # 1. Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -30,7 +30,6 @@ jobs:
         with:
           python-version: "3.11"
 
-
       # 3. Upgrade pip
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
@@ -39,21 +38,22 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # 5. Train the model
+      # 5. Train the User Behavior model
       - name: Train User Behavior Model
         run: python train_model.py
 
-      # 6. Check model quality
+      # 6. Check ML quality
       - name: Check ML Quality Gate
         run: python quality_gate.py
 
       # 7. Verify model artifacts
       - name: Verify model artifacts
         run: |
+          echo "Checking generated model files..."
           ls -lh *.pkl
           test -f user_behavior_model.pkl
           test -f label_encoders.pkl
-          echo "Model artifacts verified."
+          echo "Both model artifacts are available."
 
       # 8. Run automated tests
       - name: Run Automated Tests
@@ -63,7 +63,7 @@ jobs:
       - name: Build Docker image
         run: docker build -t user-behavior-ml:${{ github.sha }} .
 
-      # 10. Start test container
+      # 10. Start Docker container for testing
       - name: Start Docker container
         run: |
           docker run -d \
@@ -71,20 +71,22 @@ jobs:
             -p 5000:5000 \
             user-behavior-ml:${{ github.sha }}
 
-      # 11. Test application health
-      - name: Test application health
+      # 11. Check application health
+      - name: Wait for application to become ready
         run: |
           for i in {1..15}; do
             if curl --fail --silent http://localhost:5000/health; then
-              echo "Application is healthy."
+              echo "Application is ready."
               exit 0
             fi
+            echo "Waiting for application... attempt $i"
             sleep 2
           done
+
           docker logs user-behavior-container
           exit 1
 
-      # 12. Test prediction endpoint
+      # 12. Test prediction API
       - name: Test prediction endpoint
         run: |
           response=$(curl --fail --silent --show-error \
@@ -106,8 +108,8 @@ jobs:
           echo "Prediction response: $response"
           echo "$response" | grep -q '"prediction"'
 
-      # 13. Display test container logs
-      - name: Show Docker logs
+      # 13. Show Docker logs
+      - name: Show Docker container logs
         if: always()
         run: docker logs user-behavior-container || true
 
@@ -116,50 +118,55 @@ jobs:
         if: always()
         run: docker rm -f user-behavior-container || true
 
-      # 15. Login to GHCR
+      # 15. Login to GitHub Container Registry
       - name: Login to GHCR
         if: success() && github.event_name != 'pull_request'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io \
-            -u "${{ github.actor }}" --password-stdin
+            -u "${{ github.actor }}" \
+            --password-stdin
 
-      # 16. Tag Docker images
-      - name: Tag Docker images
+      # 16. Tag Docker image
+      - name: Tag Docker image for GHCR
         if: success() && github.event_name != 'pull_request'
         run: |
           IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          docker tag user-behavior-ml:${{ github.sha }} ghcr.io/${IMAGE_NAME}:v1
-          docker tag user-behavior-ml:${{ github.sha }} ghcr.io/${IMAGE_NAME}:latest
+
+          docker tag user-behavior-ml:${{ github.sha }} \
+            ghcr.io/${IMAGE_NAME}:v1
+
+          docker tag user-behavior-ml:${{ github.sha }} \
+            ghcr.io/${IMAGE_NAME}:latest
 
       # 17. Publish versioned image
-      - name: Push versioned image
+      - name: Push versioned image to GHCR
         if: success() && github.event_name != 'pull_request'
         run: |
           IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           docker push ghcr.io/${IMAGE_NAME}:v1
 
       # 18. Publish latest image
-      - name: Push latest image
+      - name: Push latest image to GHCR
         if: success() && github.event_name != 'pull_request'
         run: |
           IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           docker push ghcr.io/${IMAGE_NAME}:latest
 
       # 19. Pull published image
-      - name: Pull published image
+      - name: Pull published image from GHCR
         if: success() && github.event_name != 'pull_request'
         run: |
           IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           docker pull ghcr.io/${IMAGE_NAME}:latest
 
       # 20. Verify published image
-      - name: Verify published image
+      - name: Verify published Docker image
         if: success() && github.event_name != 'pull_request'
         run: |
           IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           docker image inspect ghcr.io/${IMAGE_NAME}:latest
 
-      # 21. Start published container
+      # 21. Run published container
       - name: Run published container
         if: success() && github.event_name != 'pull_request'
         run: |
@@ -174,16 +181,17 @@ jobs:
         run: |
           for i in {1..15}; do
             if curl --fail --silent http://localhost:5001/health; then
-              echo "Published image is healthy."
+              echo "Published container is healthy."
               exit 0
             fi
             sleep 2
           done
+
           docker logs published-user-behavior-container
           exit 1
 
-      # 23. Test prediction from published image
-      - name: Test published image prediction
+      # 23. Test prediction using published image
+      - name: Test published container prediction
         if: success() && github.event_name != 'pull_request'
         run: |
           response=$(curl --fail --silent --show-error \
@@ -202,7 +210,7 @@ jobs:
             }' \
             http://localhost:5001/predict)
 
-          echo "Published image prediction: $response"
+          echo "Published image prediction response: $response"
           echo "$response" | grep -q '"prediction"'
 
       # 24. Remove published container
@@ -210,7 +218,7 @@ jobs:
         if: always()
         run: docker rm -f published-user-behavior-container || true
 
-  # Practical 14: Kubernetes deployment
+  # Practical 14: Deploy to local Kubernetes
   deploy-kubernetes:
     needs: train-test-containerize
     if: github.event_name != 'pull_request'
@@ -225,23 +233,28 @@ jobs:
           kubectl config current-context
           kubectl get nodes
           kubectl get deployments
-          kubectl get services
 
-      # 26. Deploy the published image
+          if ($LASTEXITCODE -ne 0) {
+            throw "Docker or Kubernetes verification failed."
+          }
+
+      # 26. Update the deployment image
       - name: Deploy User Behavior API
         shell: powershell
         run: |
           kubectl set image deployment/user-behavior-api user-behavior-api=ghcr.io/pujithayarramsetty/user-behavior-ml-ci-cd:latest
+
           if ($LASTEXITCODE -ne 0) {
-            throw "Failed to update the Kubernetes image."
+            throw "Failed to update Kubernetes deployment image."
           }
 
           kubectl rollout status deployment/user-behavior-api --timeout=180s
+
           if ($LASTEXITCODE -ne 0) {
             throw "Kubernetes rollout failed."
           }
 
-      # 27. Verify deployment and replicas
+      # 27. Verify deployment, Pods and Service
       - name: Verify Kubernetes deployment
         shell: powershell
         run: |
@@ -249,13 +262,18 @@ jobs:
           kubectl get pods
           kubectl get services
 
-          $deployment = kubectl get deployment user-behavior-api -o json | ConvertFrom-Json
-          if ($deployment.status.readyReplicas -ne 3) {
-            throw "Expected three ready replicas."
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to retrieve Kubernetes resources."
           }
 
-      # 28. Test Kubernetes health endpoint
-      - name: Test Kubernetes API health
+          $deployment = kubectl get deployment user-behavior-api -o json | ConvertFrom-Json
+
+          if ($deployment.status.readyReplicas -ne 3) {
+            throw "Expected 3 ready replicas."
+          }
+
+      # 28. Test the API through port forwarding
+      - name: Test deployed API health
         shell: powershell
         run: |
           $portForward = Start-Process kubectl `
@@ -275,82 +293,20 @@ jobs:
 
                 if ($response.status -eq "healthy") {
                   $healthy = $true
-                  Write-Host "Kubernetes health check passed."
+                  Write-Host "Kubernetes API health check passed."
                   break
                 }
-              } catch {
+              }
+              catch {
                 Write-Host "Waiting for Kubernetes API..."
               }
             }
 
             if (-not $healthy) {
               kubectl get pods
-              throw "Kubernetes health check failed."
+              throw "Kubernetes API health check failed."
             }
           }
           finally {
             Stop-Process -Id $portForward.Id -Force -ErrorAction SilentlyContinue
           }
-
-      # 29. Test Kubernetes prediction endpoint
-      - name: Test Kubernetes prediction
-        shell: powershell
-        run: |
-          $portForward = Start-Process kubectl `
-            -ArgumentList "port-forward service/user-behavior-service 5002:5000" `
-            -PassThru -WindowStyle Hidden
-
-          try {
-            $connected = $false
-
-            for ($i = 0; $i -lt 15; $i++) {
-              Start-Sleep -Seconds 2
-              try {
-                $health = Invoke-RestMethod `
-                  -Uri "http://127.0.0.1:5002/health" `
-                  -TimeoutSec 3
-                $connected = $true
-                break
-              } catch {
-                Write-Host "Waiting for port forwarding..."
-              }
-            }
-
-            if (-not $connected) {
-              throw "Could not connect to the Kubernetes service."
-            }
-
-            $body = @{
-              "Device Model" = "Google Pixel 5"
-              "Operating System" = "Android"
-              "App Usage Time (min/day)" = 393
-              "Screen On Time (hours/day)" = 6.4
-              "Battery Drain (mAh/day)" = 1872
-              "Number of Apps Installed" = 67
-              "Data Usage (MB/day)" = 1122
-              "Age" = 40
-              "Gender" = "Male"
-            } | ConvertTo-Json
-
-            $response = Invoke-RestMethod `
-              -Uri "http://127.0.0.1:5002/predict" `
-              -Method Post `
-              -ContentType "application/json" `
-              -Body $body
-
-            $response | ConvertTo-Json -Depth 10
-            Write-Host "Kubernetes prediction test completed."
-          }
-          finally {
-            Stop-Process -Id $portForward.Id -Force -ErrorAction SilentlyContinue
-          }
-
-      # 30. Display rollout history and final status
-      - name: Show Kubernetes rollout history
-        if: always()
-        shell: powershell
-        run: |
-          kubectl rollout history deployment/user-behavior-api
-          kubectl get deployments
-          kubectl get pods
-          kubectl get services
