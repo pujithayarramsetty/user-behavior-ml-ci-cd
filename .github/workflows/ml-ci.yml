@@ -5,11 +5,9 @@ on:
   push:
     branches:
       - main
-
   pull_request:
     branches:
       - main
-
   workflow_dispatch:
 
 permissions:
@@ -27,9 +25,9 @@ jobs:
 
       # 2. Set up Python
       - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
       # 3. Upgrade pip
       - name: Upgrade pip
@@ -39,7 +37,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # 5. Train model
+      # 5. Train the model
       - name: Train User Behavior Model
         run: python train_model.py
 
@@ -53,6 +51,7 @@ jobs:
           ls -lh *.pkl
           test -f user_behavior_model.pkl
           test -f label_encoders.pkl
+          echo "Model artifacts verified."
 
       # 8. Run automated tests
       - name: Run Automated Tests
@@ -70,7 +69,7 @@ jobs:
             -p 5000:5000 \
             user-behavior-ml:${{ github.sha }}
 
-      # 11. Check application health
+      # 11. Test application health
       - name: Test application health
         run: |
           for i in {1..15}; do
@@ -115,7 +114,7 @@ jobs:
         if: always()
         run: docker rm -f user-behavior-container || true
 
-      # 15. Login to GitHub Container Registry
+      # 15. Login to GHCR
       - name: Login to GHCR
         if: success() && github.event_name != 'pull_request'
         run: |
@@ -216,7 +215,7 @@ jobs:
     runs-on: [self-hosted, Windows, X64]
 
     steps:
-      # 25. Verify runner and Kubernetes
+      # 25. Verify runner and Kubernetes access
       - name: Verify Kubernetes access
         shell: powershell
         run: |
@@ -226,7 +225,7 @@ jobs:
           kubectl get deployments
           kubectl get services
 
-      # 26. Deploy the published GHCR image
+      # 26. Deploy the published image
       - name: Deploy User Behavior API
         shell: powershell
         run: |
@@ -266,6 +265,7 @@ jobs:
 
             for ($i = 0; $i -lt 15; $i++) {
               Start-Sleep -Seconds 2
+
               try {
                 $response = Invoke-RestMethod `
                   -Uri "http://127.0.0.1:5002/health" `
@@ -299,7 +299,24 @@ jobs:
             -PassThru -WindowStyle Hidden
 
           try {
-            Start-Sleep -Seconds 5
+            $connected = $false
+
+            for ($i = 0; $i -lt 15; $i++) {
+              Start-Sleep -Seconds 2
+              try {
+                $health = Invoke-RestMethod `
+                  -Uri "http://127.0.0.1:5002/health" `
+                  -TimeoutSec 3
+                $connected = $true
+                break
+              } catch {
+                Write-Host "Waiting for port forwarding..."
+              }
+            }
+
+            if (-not $connected) {
+              throw "Could not connect to the Kubernetes service."
+            }
 
             $body = @{
               "Device Model" = "Google Pixel 5"
