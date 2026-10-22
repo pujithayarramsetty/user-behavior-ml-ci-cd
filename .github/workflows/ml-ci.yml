@@ -1,3 +1,4 @@
+```yaml
 name: User Behavior ML CI-CD
 
 on:
@@ -42,11 +43,11 @@ jobs:
       - name: Train User Behavior Model
         run: python train_model.py
 
-      # 6. Check model quality
+      # 6. Check ML quality
       - name: Check ML Quality Gate
         run: python quality_gate.py
 
-      # 7. Verify generated model files
+      # 7. Verify model artifacts
       - name: Verify model artifacts
         run: |
           echo "Checking generated model files..."
@@ -110,17 +111,17 @@ jobs:
           echo "Prediction response: $response"
           echo "$response" | grep -q '"prediction"'
 
-      # 13. Display Docker logs
+      # 13. Show Docker logs
       - name: Show Docker container logs
         if: always()
         run: docker logs user-behavior-container || true
 
-      # 14. Remove Docker container
+      # 14. Remove test container
       - name: Stop and remove Docker container
         if: always()
         run: docker rm -f user-behavior-container || true
 
-      # 15. Login to GitHub Container Registry
+      # 15. Login to GHCR
       - name: Login to GHCR
         if: success() && github.event_name != 'pull_request'
         run: |
@@ -128,7 +129,7 @@ jobs:
             -u "${{ github.actor }}" \
             --password-stdin
 
-      # 16. Tag the Docker image
+      # 16. Tag Docker image
       - name: Tag Docker image for GHCR
         if: success() && github.event_name != 'pull_request'
         run: |
@@ -153,21 +154,22 @@ jobs:
         run: |
           IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           docker push ghcr.io/${IMAGE_NAME}:latest
-                # Practical-8: Pull the published image
+
+      # 19. Pull the published image
       - name: Pull published image from GHCR
         if: success() && github.event_name != 'pull_request'
         run: |
           IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           docker pull ghcr.io/${IMAGE_NAME}:latest
 
-      # Verify the pulled image
+      # 20. Verify the published image
       - name: Verify published Docker image
         if: success() && github.event_name != 'pull_request'
         run: |
-          docker image inspect \
-            ghcr.io/pujithayarramsetty/user-behavior-ml-ci-cd:latest
+          IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          docker image inspect ghcr.io/${IMAGE_NAME}:latest
 
-      # Run the published image
+      # 21. Run the published container
       - name: Run published container
         if: success() && github.event_name != 'pull_request'
         run: |
@@ -176,7 +178,7 @@ jobs:
             -p 5001:5000 \
             ghcr.io/pujithayarramsetty/user-behavior-ml-ci-cd:latest
 
-      # Test the published container
+      # 22. Test published container health
       - name: Test published container health
         if: success() && github.event_name != 'pull_request'
         run: |
@@ -190,7 +192,8 @@ jobs:
 
           docker logs published-user-behavior-container
           exit 1
-                # Practical-8: Test prediction using published image
+
+      # 23. Test prediction using published image
       - name: Test published container prediction
         if: success() && github.event_name != 'pull_request'
         run: |
@@ -212,7 +215,86 @@ jobs:
 
           echo "Published image prediction response: $response"
           echo "$response" | grep -q '"prediction"'
-      # Clean up published container
+
+      # 24. Remove published container
       - name: Remove published container
         if: always()
         run: docker rm -f published-user-behavior-container || true
+
+  # Practical 14: Deploy to the local Kubernetes cluster
+  deploy-kubernetes:
+    needs: train-test-containerize
+    if: github.event_name != 'pull_request'
+    runs-on: [self-hosted, Windows, X64]
+
+    steps:
+      # 25. Verify runner and Kubernetes access
+      - name: Verify Kubernetes access
+        shell: powershell
+        run: |
+          docker --version
+          kubectl config current-context
+          kubectl get nodes
+          kubectl get deployments
+
+      # 26. Deploy the published GHCR image
+      - name: Deploy User Behavior API
+        shell: powershell
+        run: |
+          kubectl set image deployment/user-behavior-api user-behavior-api=ghcr.io/pujithayarramsetty/user-behavior-ml-ci-cd:latest
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to update the Kubernetes deployment image."
+          }
+
+          kubectl rollout status deployment/user-behavior-api --timeout=180s
+          if ($LASTEXITCODE -ne 0) {
+            throw "Kubernetes rollout failed."
+          }
+
+      # 27. Verify deployment, Pods, and Service
+      - name: Verify Kubernetes deployment
+        shell: powershell
+        run: |
+          kubectl get deployments
+          kubectl get pods
+          kubectl get services
+
+          $deployment = kubectl get deployment user-behavior-api -o json | ConvertFrom-Json
+          if ($deployment.status.readyReplicas -ne 3) {
+            throw "Expected 3 ready replicas."
+          }
+
+      # 28. Verify the API through port forwarding
+      - name: Test deployed API health
+        shell: powershell
+        run: |
+          $portForward = Start-Process kubectl `
+            -ArgumentList "port-forward service/user-behavior-service 5002:5000" `
+            -PassThru -WindowStyle Hidden
+
+          try {
+            $healthy = $false
+
+            for ($i = 0; $i -lt 15; $i++) {
+              Start-Sleep -Seconds 2
+
+              try {
+                $response = Invoke-RestMethod -Uri "http://127.0.0.1:5002/health" -TimeoutSec 3
+                if ($response.status -eq "healthy") {
+                  $healthy = $true
+                  Write-Host "Kubernetes API health check passed."
+                  break
+                }
+              } catch {
+                Write-Host "Waiting for Kubernetes API..."
+              }
+            }
+
+            if (-not $healthy) {
+              kubectl get pods
+              throw "Kubernetes API health check failed."
+            }
+          }
+          finally {
+            Stop-Process -Id $portForward.Id -Force -ErrorAction SilentlyContinue
+          }
