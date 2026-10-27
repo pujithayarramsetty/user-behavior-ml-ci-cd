@@ -1,11 +1,12 @@
-
 import os
 import time
-import logging
 import uuid
+import logging
 
 import joblib
-from flask import Flask, request, jsonify, g, Response
+import pandas as pd
+
+from flask import Flask, request, jsonify
 from prometheus_client import (
     Counter,
     Histogram,
@@ -13,162 +14,215 @@ from prometheus_client import (
     CONTENT_TYPE_LATEST
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
-
 app = Flask(__name__)
 
+# --------------------------------------------------
+# Logging configuration
+# --------------------------------------------------
+
+logging.basicConfig(level=logging.INFO)
+
+logger = logging.getLogger(__name__)
+
+# --------------------------------------------------
+# Load the trained model and encoders
+# --------------------------------------------------
+
+MODEL_PATH = "user_behavior_model.pkl"
+ENCODER_PATH = "label_encoders.pkl"
+
+model = joblib.load(MODEL_PATH)
+label_encoders = joblib.load(ENCODER_PATH)
+
+# Get the exact feature names and order used during training.
+FEATURE_NAMES = list(model.feature_names_in_)
+
+logger.info("Model loaded successfully")
+logger.info("Expected model features: %s", FEATURE_NAMES)
+
+# --------------------------------------------------
 # Prometheus metrics
+# --------------------------------------------------
+
 REQUEST_COUNT = Counter(
     "flask_requests_total",
-    "Total number of HTTP requests",
+    "Total HTTP requests",
     ["method", "endpoint", "status"]
 )
 
 REQUEST_LATENCY = Histogram(
     "flask_request_duration_seconds",
-    "HTTP request processing time"
+    "HTTP request duration in seconds"
 )
 
-# Load trained model and encoders
-try:
-    model = joblib.load("user_behavior_model.pkl")
-    label_encoders = joblib.load("label_encoders.pkl")
-    logger.info("Model and label encoders loaded successfully")
-except Exception:
-    logger.exception("Failed to load model or label encoders")
-    raise
+# --------------------------------------------------
+# Request tracking
+# --------------------------------------------------
 
-
-# Start request timer and assign request ID
 @app.before_request
-def start_request_timer():
-    g.request_start_time = time.perf_counter()
-    g.request_id = str(uuid.uuid4())
+def before_request():
+    request.start_time = time.time()
+    request.request_id = str(uuid.uuid4())
 
 
-# Record request metrics and log request duration
 @app.after_request
-def record_request_metrics(response):
-    start_time = getattr(g, "request_start_time", None)
+def after_request(response):
 
-    if start_time is not None and request.path != "/metrics":
-        duration = time.perf_counter() - start_time
+    endpoint = request.endpoint or "unknown"
+
+    if request.path != "/metrics":
 
         REQUEST_COUNT.labels(
             method=request.method,
-            endpoint=request.path,
-            status=response.status_code
+            endpoint=endpoint,
+            status=str(response.status_code)
         ).inc()
+
+        duration = time.time() - getattr(
+            request,
+            "start_time",
+            time.time()
+        )
 
         REQUEST_LATENCY.observe(duration)
 
-        logger.info(
-            "request_id=%s method=%s path=%s status=%s duration=%.4fs",
-            getattr(g, "request_id", "unknown"),
-            request.method,
-            request.path,
-            response.status_code,
-            duration
-        )
+    response.headers["X-Request-ID"] = getattr(
+        request,
+        "request_id",
+        "unknown"
+    )
 
     return response
 
-
+# --------------------------------------------------
 # Home endpoint
+# --------------------------------------------------
+
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({
-        "message": "User Behavior ML API is running",
-        "status": "ok"
+        "status": "ok",
+        "message": "User Behavior ML API is running"
     })
 
+# --------------------------------------------------
+# Health endpoint
+# --------------------------------------------------
 
-# Health check endpoint
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({
         "status": "healthy"
     })
 
-
-# Prometheus metrics endpoint
-@app.route("/metrics", methods=["GET"])
-def metrics():
-    return Response(
-        generate_latest(),
-        content_type=CONTENT_TYPE_LATEST
-    )
-
-
+# --------------------------------------------------
 # Prediction endpoint
+# --------------------------------------------------
+
 @app.route("/predict", methods=["POST"])
 def predict():
+
     try:
         data = request.get_json(silent=True)
 
-        if not data:
-            logger.warning("Prediction request received without valid JSON")
+        if not isinstance(data, dict):
             return jsonify({
-                "error": "Request body must contain valid JSON"
+                "error": "Request body must be a JSON object"
             }), 400
 
-        # Convert input categories using saved encoders
-        processed_data = {}
+        # Check that every required feature is present.
+        missing_features = [
+            feature
+            for feature in FEATURE_NAMES
+            if feature not in data
+        ]
 
-        for column, value in data.items():
-            if column in label_encoders:
-                processed_data[column] = label_encoders[column].transform(
-                    [str(value)]
-                )[0]
-            else:
-                processed_data[column] = value
+        if missing_features:
+            return jsonify({
+                "error": "Missing required features",
+                "missing_features": missing_features,
+                "expected_features": FEATURE_NAMES
+            }), 400
 
-        import pandas as pd
+        # Arrange the values in the exact training order.
+        input_data = {
+            feature: data[feature]
+            for feature in FEATURE_NAMES
+        }
 
-        input_df = pd.DataFrame([processed_data])
-        prediction = model.predict(input_df)
-
-        result = prediction[0]
-
-        # Convert NumPy values to normal Python values if needed
-        if hasattr(result, "item"):
-            result = result.item()
-
-        logger.info(
-            "request_id=%s prediction completed successfully",
-            getattr(g, "request_id", "unknown")
+        input_df = pd.DataFrame(
+            [input_data],
+            columns=FEATURE_NAMES
         )
 
+        # Encode categorical inputs using the saved encoders.
+        for column, encoder in label_encoders.items():
+
+            if column not in input_df.columns:
+                continue
+
+            value = str(input_df.at[0, column])
+
+            known_classes = [
+                str(item)
+                for item in encoder.classes_
+            ]
+
+            if value not in known_classes:
+                return jsonify({
+                    "error": f"Unknown value for {column}",
+                    "received_value": value,
+                    "allowed_values": known_classes
+                }), 400
+
+            input_df[column] = encoder.transform(
+                input_df[column].astype(str)
+            )
+
+        # Ensure the input order exactly matches model training.
+        input_df = input_df[FEATURE_NAMES]
+
+        # Predict the user behavior class.
+        prediction = model.predict(input_df)[0]
+
         return jsonify({
-            "prediction": result
+            "prediction": int(prediction),
+            "message": "Prediction successful",
+            "request_id": request.request_id
         })
 
-    except ValueError as error:
-        logger.warning(
-            "request_id=%s invalid prediction input: %s",
-            getattr(g, "request_id", "unknown"),
-            str(error)
-        )
-        return jsonify({
-            "error": "Invalid input value",
-            "details": str(error)
-        }), 400
+    except Exception as error:
 
-    except Exception:
-        logger.exception(
-            "request_id=%s prediction failed",
-            getattr(g, "request_id", "unknown")
-        )
+        logger.exception("Prediction failed")
+
         return jsonify({
-            "error": "Prediction failed. Check application logs."
+            "error": "Prediction failed",
+            "details": str(error)
         }), 500
 
+# --------------------------------------------------
+# Prometheus metrics endpoint
+# --------------------------------------------------
+
+@app.route("/metrics", methods=["GET"])
+def metrics():
+
+    return (
+        generate_latest(),
+        200,
+        {"Content-Type": CONTENT_TYPE_LATEST}
+    )
+
+# --------------------------------------------------
+# Run the Flask application
+# --------------------------------------------------
 
 if __name__ == "__main__":
+
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=False
+    )
