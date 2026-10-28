@@ -1,17 +1,16 @@
 
 from pathlib import Path
 import json
+
 import joblib
 
 DRIFT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = DRIFT_DIR.parent
 
 CANDIDATE_FILE = DRIFT_DIR / "candidate_model.pkl"
-REPORT_FILE = DRIFT_DIR / "drift_report.json"
-ACCURACY_FILE = DRIFT_DIR / "candidate_metrics.json"
+METRICS_FILE = DRIFT_DIR / "candidate_metrics.json"
 
-# Existing production model
-PRODUCTION_MODEL = Path("user_behavior_model.pkl")
-
+PRODUCTION_MODEL = ROOT_DIR / "user_behavior_model.pkl"
 MIN_ACCURACY = 0.85
 
 
@@ -20,30 +19,35 @@ def approve_candidate():
         print("Candidate model not found. Nothing to approve.")
         return
 
-    if not ACCURACY_FILE.exists():
-        print("Candidate metrics missing. Approval denied.")
+    if not METRICS_FILE.exists():
+        print("Candidate metrics not found. Approval denied.")
         return
 
-    metrics = json.loads(ACCURACY_FILE.read_text())
+    with open(METRICS_FILE, "r", encoding="utf-8") as file:
+        metrics = json.load(file)
+
     accuracy = metrics.get("accuracy")
 
     if accuracy is None or accuracy < MIN_ACCURACY:
-        print("Candidate failed the accuracy requirement.")
+        print("Candidate failed the quality gate.")
         print("Existing production model remains unchanged.")
         return
 
-    # Keep the original model safe before promotion.
+    # Validate the candidate model before promotion
+    candidate = joblib.load(CANDIDATE_FILE)
+
+    # Back up the existing production model if present
     if PRODUCTION_MODEL.exists():
-        backup = PRODUCTION_MODEL.with_suffix(".backup.pkl")
-        joblib.copy if False else None
+        backup_file = ROOT_DIR / "user_behavior_model.backup.pkl"
         import shutil
-        shutil.copy2(PRODUCTION_MODEL, backup)
-        print(f"Existing model backed up to: {backup}")
+        shutil.copy2(PRODUCTION_MODEL, backup_file)
+        print(f"Production model backed up to: {backup_file}")
 
-    joblib.dump(joblib.load(CANDIDATE_FILE), PRODUCTION_MODEL)
+    # Promote the candidate model
+    joblib.dump(candidate, PRODUCTION_MODEL)
 
-    print(f"Candidate approved with accuracy: {accuracy:.4f}")
-    print("Candidate promoted to production model.")
+    print(f"Candidate approved. Accuracy: {accuracy:.4f}")
+    print(f"Production model saved to: {PRODUCTION_MODEL}")
 
 
 if __name__ == "__main__":
