@@ -29,8 +29,12 @@ jobs:
       - name: Prepare reference data
         run: python drift/prepare_reference.py
 
-      - name: Simulate current data
-        run: python drift/simulate_current_data.py --mode drift
+      - name: Test no-drift case
+        run: |
+          python drift/simulate_current_data.py --mode stable
+          python drift/detect_drift.py
 
-      - name: Detect data drift
-        run: python drift/detect_drift.py
+      - name: Test drift case
+        run: |
+          python drift/simulate_current_data.py --mode drift
+          python drift/detect_drift.py
