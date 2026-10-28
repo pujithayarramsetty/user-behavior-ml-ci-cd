@@ -1,4 +1,4 @@
-```python
+
 from pathlib import Path
 import json
 
@@ -166,4 +166,4 @@ def retrain_candidate():
 
 if __name__ == "__main__":
     retrain_candidate()
-```
+
