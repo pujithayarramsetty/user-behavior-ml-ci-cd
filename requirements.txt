@@ -1,6 +1,5 @@
-
 pandas
+numpy
+scipy
 scikit-learn
 joblib
-flask
-prometheus-client
