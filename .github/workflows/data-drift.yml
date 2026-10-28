@@ -3,6 +3,7 @@ name: Data Drift Detection
 
 on:
   workflow_dispatch:
+
   push:
     paths:
       - "drift/**"
@@ -35,14 +36,26 @@ jobs:
           python drift/simulate_current_data.py --mode stable
           python drift/detect_drift.py
 
+      - name: Verify no-drift result
+        run: |
+          python -c "import json; r=json.load(open('drift/drift_report.json')); print(json.dumps(r, indent=2)); assert not r.get('overall_drift', False), 'Expected no drift in stable data'"
+
       - name: Test drift case
         run: |
           python drift/simulate_current_data.py --mode drift
           python drift/detect_drift.py
+
+      - name: Verify drift result
+        run: |
+          python -c "import json; r=json.load(open('drift/drift_report.json')); print(json.dumps(r, indent=2)); assert r.get('overall_drift', False), 'Expected drift in drifted data'"
 
       - name: Retrain candidate model
         run: python drift/retrain_candidate.py
 
       - name: Check candidate quality
         run: |
-          python -c "import json; m=json.load(open('drift/candidate_metrics.json')); print(json.dumps(m, indent=2)); assert m['passes_quality_gate'], 'Candidate failed quality gate'"
+          python -c "import json; m=json.load(open('drift/candidate_metrics.json')); print(json.dumps(m, indent=2)); assert m.get('passes_quality_gate', False), 'Candidate failed quality gate'"
+
+      - name: Verify candidate model and encoders
+        run: |
+          python -c "from pathlib import Path; p=Path('drift'); assert (p/'candidate_model.pkl').exists(), 'Candidate model missing'; assert (p/'candidate_label_encoders.pkl').exists(), 'Candidate encoders missing'; print('Candidate artifacts exist.')"
