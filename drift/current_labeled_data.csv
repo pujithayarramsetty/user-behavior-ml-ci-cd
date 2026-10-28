@@ -1,1 +1,11 @@
 Device Model,Operating System,App Usage Time (min/day),Screen On Time (hours/day),Battery Drain (mAh/day),Number of Apps Installed,Data Usage (MB/day),Age,Gender,User Behavior Class
+Google Pixel 5,Android,393,6.4,1872,67,1122,40,Male,4
+OnePlus 9,Android,268,4.7,1331,42,944,47,Female,3
+Xiaomi Mi 11,Android,154,4.0,761,32,322,42,Male,2
+Google Pixel 5,Android,239,4.8,1676,56,871,20,Male,3
+iPhone 12,iOS,187,4.3,1367,58,988,31,Female,3
+Google Pixel 5,Android,99,2.0,940,35,564,31,Male,2
+Samsung Galaxy S21,Android,350,7.3,1802,66,1054,21,Female,4
+OnePlus 9,Android,543,11.4,2956,82,1702,31,Male,5
+Samsung Galaxy S21,Android,340,7.7,2138,75,1053,42,Female,4
+iPhone 12,iOS,424,6.6,1957,75,1301,42,Male,4
