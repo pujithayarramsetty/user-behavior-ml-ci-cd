@@ -1,8 +1,10 @@
-import pandas as pd
-from pathlib import Path
 
-# Load the existing User Behavior dataset
-DATASET_PATH = Path("user_behavior_dataset.csv")
+from pathlib import Path
+import pandas as pd
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+DATASET_PATH = ROOT_DIR / "user_behavior_dataset.csv"
+OUTPUT_PATH = Path(__file__).resolve().parent / "reference_data.csv"
 
 FEATURES = [
     "App Usage Time (min/day)",
@@ -13,35 +15,28 @@ FEATURES = [
     "Age",
 ]
 
-# Check whether the dataset exists
-if not DATASET_PATH.exists():
-    raise FileNotFoundError(
-        "user_behavior_dataset.csv was not found."
-    )
 
-# Read dataset
-df = pd.read_csv(DATASET_PATH)
+def prepare_reference():
+    if not DATASET_PATH.exists():
+        raise FileNotFoundError(
+            f"Dataset not found: {DATASET_PATH}"
+        )
 
-# Check required columns
-missing = [column for column in FEATURES if column not in df.columns]
+    df = pd.read_csv(DATASET_PATH)
 
-if missing:
-    raise ValueError(f"Missing columns: {missing}")
+    missing = [col for col in FEATURES if col not in df.columns]
+    if missing:
+        raise ValueError(f"Missing dataset columns: {missing}")
 
-# Keep reference features and remove missing values
-reference_data = df[FEATURES].dropna()
+    reference = df[FEATURES].dropna()
 
-# Create drift folder
-output_path = Path("drift")
-output_path.mkdir(exist_ok=True)
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    reference.to_csv(OUTPUT_PATH, index=False)
 
-# Save reference data
-reference_data.to_csv(
-    output_path / "reference_data.csv",
-    index=False
-)
+    print("Reference data created successfully!")
+    print("Rows:", len(reference))
+    print("Saved to:", OUTPUT_PATH)
 
-print("Reference data prepared successfully!")
-print("Rows:", len(reference_data))
-print("Features:", FEATURES)
-print("Saved to: drift/reference_data.csv")
+
+if __name__ == "__main__":
+    prepare_reference()
