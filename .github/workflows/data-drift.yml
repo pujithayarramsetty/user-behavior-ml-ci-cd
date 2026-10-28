@@ -1,3 +1,4 @@
+
 name: Data Drift Detection
 
 on:
@@ -38,3 +39,10 @@ jobs:
         run: |
           python drift/simulate_current_data.py --mode drift
           python drift/detect_drift.py
+
+      - name: Retrain candidate model
+        run: python drift/retrain_candidate.py
+
+      - name: Check candidate quality
+        run: |
+          python -c "import json; m=json.load(open('drift/candidate_metrics.json')); print(json.dumps(m, indent=2)); assert m['passes_quality_gate'], 'Candidate failed quality gate'"
