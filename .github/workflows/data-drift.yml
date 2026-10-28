@@ -28,6 +28,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas numpy scipy scikit-learn joblib
 
+              - name: Train production model if missing
+        run: |
+          if [ ! -f user_behavior_model.pkl ] || [ ! -f label_encoders.pkl ]; then
+            python train_model.py
+          fi
+
       - name: Prepare reference data
         run: python drift/prepare_reference.py
 
