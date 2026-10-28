@@ -77,9 +77,17 @@ def retrain_candidate():
     model.fit(X_train, y_train)
 
     predictions = model.predict(X_test)
-    accuracy = accuracy_score(y_test, predictions)
+accuracy = accuracy_score(y_test, predictions)
 
-    joblib.dump(model, CANDIDATE_FILE)
+joblib.dump(model, CANDIDATE_FILE)
+
+metrics = {
+    "accuracy": float(accuracy)
+}
+
+(DRIFT_DIR / "candidate_metrics.json").write_text(
+    json.dumps(metrics, indent=4)
+)
 
     print(f"Candidate model saved: {CANDIDATE_FILE}")
     print(f"Candidate accuracy: {accuracy:.4f}")
