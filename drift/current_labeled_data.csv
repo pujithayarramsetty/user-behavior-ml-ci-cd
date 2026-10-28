@@ -1,6 +1,1 @@
-App Usage Time (min/day),Screen On Time (hours/day),Battery Drain (mAh/day),Number of Apps Installed,Data Usage (MB/day),Age,User Behavior Class
-393,6.4,1872,67,1122,40,4
-268,4.7,1331,42,944,47,3
-154,4.0,761,32,322,42,2
-239,4.8,1676,56,871,20,3
-187,4.3,1367,58,988,31,3
+Device Model,Operating System,App Usage Time (min/day),Screen On Time (hours/day),Battery Drain (mAh/day),Number of Apps Installed,Data Usage (MB/day),Age,Gender,User Behavior Class
